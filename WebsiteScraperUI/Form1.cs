@@ -83,7 +83,13 @@ namespace WebsiteScraperUI
         public Scraper(string baseUrl)
         {
             _httpClient = new HttpClient();
-            _baseUrl = baseUrl;
+            var uri = new Uri(baseUrl);
+            _baseUrl = uri.GetLeftPart(UriPartial.Authority);
+            if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
+            {
+                _baseUrl += uri.AbsolutePath.Substring(0, uri.AbsolutePath.LastIndexOf('/') + 1);
+            }
+
             _converter = new Converter();
             _visitedLinks = new HashSet<string>();
             _stringBuilder = new StringBuilder();
@@ -117,19 +123,46 @@ namespace WebsiteScraperUI
                 document.LoadHtml(html);
 
                 // Refined Content Extraction
-                HtmlNode contentNode = document.DocumentNode.SelectSingleNode("//main") ??
-                                       document.DocumentNode.SelectSingleNode("//article") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@id='main-content']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@id='content']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@id='page-content']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@id='wrapper']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@id='container']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@class='main-content']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@class='content']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@class='page-content']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@class='wrapper']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@class='container']") ??
-                                       document.DocumentNode.SelectSingleNode("//div[@class='doc-content']");
+                HtmlNode? contentNode = document.DocumentNode.SelectSingleNode("//main") ??
+                                       document.DocumentNode.SelectSingleNode("//article");
+
+                if (contentNode == null)
+                {
+                    // Fallback to common ID-based divs
+                    contentNode = document.DocumentNode.SelectSingleNode("//div[@id='main-content']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@id='content']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@id='page-content']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@id='wrapper']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@id='container']");
+                }
+
+                if (contentNode == null)
+                {
+                    // Fallback to common Class-based divs
+                    contentNode = document.DocumentNode.SelectSingleNode("//div[@class='main-content']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@class='content']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@class='page-content']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@class='wrapper']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@class='container']") ??
+                                  document.DocumentNode.SelectSingleNode("//div[@class='doc-content']");
+                }
+
+                if (contentNode == null)
+                {
+                    // Aggressive Fallback: Try to find the largest div in the body, excluding known non-content elements
+                    // This is a heuristic and might need further refinement based on specific website structures.
+                    // Common non-content elements to exclude: nav, header, footer, sidebars
+                    var body = document.DocumentNode.SelectSingleNode("//body");
+                    if (body != null)
+                    {
+                        var candidateDivs = body.SelectNodes(".//div[not(contains(@class, 'nav')) and not(contains(@class, 'header')) and not(contains(@class, 'footer')) and not(contains(@class, 'sidebar')) and not(contains(@id, 'nav')) and not(contains(@id, 'header')) and not(contains(@id, 'footer')) and not(contains(@id, 'sidebar'))]");
+                        if (candidateDivs != null && candidateDivs.Any())
+                        {
+                            contentNode = candidateDivs.OrderByDescending(n => n.InnerText.Length).FirstOrDefault();
+                            Console.WriteLine($"Using aggressive fallback for {url}. Selected div with text length: {contentNode?.InnerText.Length ?? 0}");
+                        }
+                    }
+                }
 
                 if (contentNode != null)
                 {
@@ -152,23 +185,38 @@ namespace WebsiteScraperUI
                     foreach (var link in links)
                     {
                         var href = link.GetAttributeValue("href", string.Empty);
+                        Console.WriteLine($"  Processing link href: {href}");
                         if (!string.IsNullOrWhiteSpace(href))
                         {
                             var absoluteUri = new Uri(new Uri(_baseUrl), href);
                             var absoluteUrl = absoluteUri.ToString();
+                            Console.WriteLine($"    Constructed absolute URL: {absoluteUrl}");
 
                             // Ignore anchor links that point to the same page
                             if (absoluteUri.Fragment.Length > 0 && absoluteUri.GetLeftPart(UriPartial.Path) == new Uri(url).GetLeftPart(UriPartial.Path))
                             {
-                                Console.WriteLine($"Ignoring anchor link: {absoluteUrl}");
+                                Console.WriteLine($"    Ignoring anchor link: {absoluteUrl}");
                                 continue;
                             }
 
-                            if (absoluteUrl.StartsWith(_baseUrl) && !_visitedLinks.Contains(absoluteUrl))
+                            if (!absoluteUrl.StartsWith(_baseUrl))
                             {
-                                Console.WriteLine($"Following link: {absoluteUrl}");
-                                await ScrapePageAndFindLinks(absoluteUrl);
+                                Console.WriteLine($"    Not following (outside base URL): {absoluteUrl}");
+                                continue;
                             }
+
+                            if (_visitedLinks.Contains(absoluteUrl))
+                            {
+                                Console.WriteLine($"    Not following (already visited): {absoluteUrl}");
+                                continue;
+                            }
+
+                            Console.WriteLine($"Following link: {absoluteUrl}");
+                            await ScrapePageAndFindLinks(absoluteUrl);
+                        }
+                        else
+                        {
+                            Console.WriteLine($"  Skipping empty or whitespace href");
                         }
                     }
                 }
