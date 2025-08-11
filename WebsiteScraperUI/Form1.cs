@@ -75,58 +75,53 @@ namespace WebsiteScraperUI
         private readonly HttpClient _httpClient;
         private readonly string _baseUrl;
         private readonly Converter _converter;
+        private readonly HashSet<string> _visitedLinks;
+        private IProgress<ProgressReport>? _progress;
+        private StringBuilder _stringBuilder;
+        private int _scrapedCount;
 
         public Scraper(string baseUrl)
         {
             _httpClient = new HttpClient();
             _baseUrl = baseUrl;
             _converter = new Converter();
+            _visitedLinks = new HashSet<string>();
+            _stringBuilder = new StringBuilder();
+            _scrapedCount = 0;
         }
 
         public async Task<string> ScrapeAsync(IProgress<ProgressReport> progress)
         {
-            var stringBuilder = new StringBuilder();
-            var allLinks = new HashSet<string>();
-            await GetLinksAsync(_baseUrl, allLinks, progress);
-
-            int i = 0;
-            foreach (var link in allLinks)
-            {
-                try
-                {
-                    var html = await _httpClient.GetStringAsync(link);
-                    var document = new HtmlAgilityPack.HtmlDocument();
-                    document.LoadHtml(html);
-
-                    var contentNode = document.DocumentNode.SelectSingleNode("//body"); // Adjust this selector to target the main content
-                    if (contentNode != null)
-                    {
-                        var markdown = _converter.Convert(contentNode.InnerHtml);
-                        stringBuilder.AppendLine(markdown);
-                        stringBuilder.AppendLine("\n---\n");
-                    }
-
-                    i++;
-                    progress.Report(new ProgressReport { PercentComplete = (int)((double)i / allLinks.Count * 100), StatusMessage = $"Scraping: {link}" });
-                }
-                catch (Exception ex)
-                {
-                    // Log or handle the error for individual page scraping
-                    Console.WriteLine($"Error scraping {link}: {ex.Message}");
-                }
-            }
-
-            return stringBuilder.ToString();
+            _progress = progress;
+            await ScrapePageAndFindLinks(_baseUrl);
+            return _stringBuilder.ToString();
         }
 
-        private async Task GetLinksAsync(string url, HashSet<string> allLinks, IProgress<ProgressReport> progress)
+        private async Task ScrapePageAndFindLinks(string url)
         {
+            if (_visitedLinks.Contains(url)) return;
+
+            _visitedLinks.Add(url);
+            _scrapedCount++;
+            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _visitedLinks.Count * 100), StatusMessage = $"Scraping: {url}" });
+
             try
             {
                 var html = await _httpClient.GetStringAsync(url);
                 var document = new HtmlAgilityPack.HtmlDocument();
                 document.LoadHtml(html);
 
+                // Extract content
+                var contentNode = document.DocumentNode.SelectSingleNode("//div[@class='doc-content']"); // Targeted selector
+                if (contentNode != null)
+                {
+                    var markdown = _converter.Convert(contentNode.InnerText);
+                    _stringBuilder.AppendLine($"# {document.DocumentNode.SelectSingleNode("//title")?.InnerText ?? "No Title"}");
+                    _stringBuilder.AppendLine(markdown);
+                    _stringBuilder.AppendLine("\n---\n");
+                }
+
+                // Find and follow links
                 var links = document.DocumentNode.SelectNodes("//a[@href]");
                 if (links != null)
                 {
@@ -136,11 +131,9 @@ namespace WebsiteScraperUI
                         if (!string.IsNullOrWhiteSpace(href))
                         {
                             var absoluteUrl = new Uri(new Uri(_baseUrl), href).ToString();
-                            if (absoluteUrl.StartsWith(_baseUrl) && !allLinks.Contains(absoluteUrl))
+                            if (absoluteUrl.StartsWith(_baseUrl) && !_visitedLinks.Contains(absoluteUrl))
                             {
-                                allLinks.Add(absoluteUrl);
-                                progress.Report(new ProgressReport { PercentComplete = 0, StatusMessage = $"Found {allLinks.Count} links..." });
-                                await GetLinksAsync(absoluteUrl, allLinks, progress);
+                                await ScrapePageAndFindLinks(absoluteUrl);
                             }
                         }
                     }
@@ -148,9 +141,9 @@ namespace WebsiteScraperUI
             }
             catch (Exception ex)
             {
-                // Log or handle the error for link discovery
-                Console.WriteLine($"Error discovering links at {url}: {ex.Message}");
+                Console.WriteLine($"Error scraping {url}: {ex.Message}");
             }
+            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _visitedLinks.Count * 100), StatusMessage = $"Scraped {_scrapedCount} of {_visitedLinks.Count} pages." });
         }
     }
 
