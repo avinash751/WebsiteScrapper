@@ -1,0 +1,60 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v9.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v9.0": {
+      "WebsiteScraperUI/1.0.0": {
+        "dependencies": {
+          "HtmlAgilityPack": "1.12.2",
+          "ReverseMarkdown": "4.7.0"
+        },
+        "runtime": {
+          "WebsiteScraperUI.dll": {}
+        }
+      },
+      "HtmlAgilityPack/1.12.2": {
+        "runtime": {
+          "lib/net7.0/HtmlAgilityPack.dll": {
+            "assemblyVersion": "1.12.2.0",
+            "fileVersion": "1.12.2.0"
+          }
+        }
+      },
+      "ReverseMarkdown/4.7.0": {
+        "dependencies": {
+          "HtmlAgilityPack": "1.12.2"
+        },
+        "runtime": {
+          "lib/net9.0/ReverseMarkdown.dll": {
+            "assemblyVersion": "4.7.0.0",
+            "fileVersion": "4.7.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "WebsiteScraperUI/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "HtmlAgilityPack/1.12.2": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-btF/9sB65h0V9ipZxVfEQ9fxDwXSFRwhi4Z1qFBgnXONqWVKZE3LxS0JEMW73G3gvrFI7/IAqLA1y/15HDa3fw==",
+      "path": "htmlagilitypack/1.12.2",
+      "hashPath": "htmlagilitypack.1.12.2.nupkg.sha512"
+    },
+    "ReverseMarkdown/4.7.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-RM5i+RoCG+9Vc897SyjGe2qQ6FRYitU+JFjc4ZAQWQCN/8R1uOSO4B8DdAtBEtRhJcZfIEIqshe2MoLDChyExw==",
+      "path": "reversemarkdown/4.7.0",
+      "hashPath": "reversemarkdown.4.7.0.nupkg.sha512"
+    }
+  }
+}
