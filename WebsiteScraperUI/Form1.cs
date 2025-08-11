@@ -70,6 +70,12 @@ namespace WebsiteScraperUI
         }
     }
 
+    public class ProgressReport
+    {
+        public int PercentComplete { get; set; }
+        public string StatusMessage { get; set; } = string.Empty;
+    }
+
     public class Scraper
     {
         private readonly HttpClient _httpClient;
@@ -94,7 +100,7 @@ namespace WebsiteScraperUI
             _linksToScrape = new Queue<string>();
             _stringBuilder = new StringBuilder();
             _scrapedCount = 0;
-            _totalLinksDiscovered = 0;
+            _totalLinksDiscovered = 1; // Initialize to 1 for the initial URL
         }
 
         public async Task<string> ScrapeAsync(IProgress<ProgressReport> progress)
@@ -117,7 +123,8 @@ namespace WebsiteScraperUI
             Console.WriteLine($"Attempting to scrape: {url}");
 
             _scrapedCount++;
-            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _totalLinksDiscovered * 100), StatusMessage = $"Scraping: {url}" });
+            int percentComplete = _totalLinksDiscovered > 0 ? (int)((double)_scrapedCount / _totalLinksDiscovered * 100) : 0;
+            _progress?.Report(new ProgressReport { PercentComplete = percentComplete, StatusMessage = $"Scraping: {url}" });
 
             try
             {
