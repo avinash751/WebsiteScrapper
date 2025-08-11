@@ -73,48 +73,51 @@ namespace WebsiteScraperUI
     public class Scraper
     {
         private readonly HttpClient _httpClient;
-        private readonly string _baseUrl;
+        private readonly Uri _baseUri; // Store the base URI object
+        private readonly string _baseHost; // Store the base host for comparison
         private readonly Converter _converter;
-        private readonly HashSet<string> _visitedLinks;
+        private readonly HashSet<string> _visitedLinks; // Stores normalized URLs (without fragments)
+        private readonly Queue<string> _linksToScrape; // Queue for links to be scraped
         private IProgress<ProgressReport>? _progress;
         private StringBuilder _stringBuilder;
         private int _scrapedCount;
+        private int _totalLinksDiscovered;
 
         public Scraper(string baseUrl)
         {
             _httpClient = new HttpClient();
-            var uri = new Uri(baseUrl);
-            _baseUrl = uri.GetLeftPart(UriPartial.Authority);
-            if (!string.IsNullOrEmpty(uri.AbsolutePath) && uri.AbsolutePath != "/")
-            {
-                _baseUrl += uri.AbsolutePath.Substring(0, uri.AbsolutePath.LastIndexOf('/') + 1);
-            }
+            _baseUri = new Uri(baseUrl);
+            _baseHost = _baseUri.Host; // Only store the host for comparison
 
             _converter = new Converter();
             _visitedLinks = new HashSet<string>();
+            _linksToScrape = new Queue<string>();
             _stringBuilder = new StringBuilder();
             _scrapedCount = 0;
+            _totalLinksDiscovered = 0;
         }
 
         public async Task<string> ScrapeAsync(IProgress<ProgressReport> progress)
         {
             _progress = progress;
-            await ScrapePageAndFindLinks(_baseUrl);
+            _linksToScrape.Enqueue(_baseUri.ToString()); // Start with the initial URL
+            _visitedLinks.Add(NormalizeUrl(_baseUri.ToString())); // Add initial URL to visited links
+
+            while (_linksToScrape.Any())
+            {
+                var currentUrl = _linksToScrape.Dequeue();
+                await ScrapePageAndFindLinks(currentUrl);
+            }
+
             return _stringBuilder.ToString();
         }
 
         private async Task ScrapePageAndFindLinks(string url)
         {
             Console.WriteLine($"Attempting to scrape: {url}");
-            if (_visitedLinks.Contains(url))
-            {
-                Console.WriteLine($"Already visited: {url}");
-                return;
-            }
 
-            _visitedLinks.Add(url);
             _scrapedCount++;
-            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _visitedLinks.Count * 100), StatusMessage = $"Scraping: {url}" });
+            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _totalLinksDiscovered * 100), StatusMessage = $"Scraping: {url}" });
 
             try
             {
@@ -150,8 +153,6 @@ namespace WebsiteScraperUI
                 if (contentNode == null)
                 {
                     // Aggressive Fallback: Try to find the largest div in the body, excluding known non-content elements
-                    // This is a heuristic and might need further refinement based on specific website structures.
-                    // Common non-content elements to exclude: nav, header, footer, sidebars
                     var body = document.DocumentNode.SelectSingleNode("//body");
                     if (body != null)
                     {
@@ -188,31 +189,48 @@ namespace WebsiteScraperUI
                         Console.WriteLine($"  Processing link href: {href}");
                         if (!string.IsNullOrWhiteSpace(href))
                         {
-                            var absoluteUri = new Uri(new Uri(_baseUrl), href);
+                            Uri absoluteUri;
+                            try
+                            {
+                                absoluteUri = new Uri(new Uri(url), href);
+                            }
+                            catch (UriFormatException ex)
+                            {
+                                Console.WriteLine($"    Invalid URI format for href '{href}': {ex.Message}");
+                                continue;
+                            }
+
                             var absoluteUrl = absoluteUri.ToString();
                             Console.WriteLine($"    Constructed absolute URL: {absoluteUrl}");
 
-                            // Ignore anchor links that point to the same page
-                            if (absoluteUri.Fragment.Length > 0 && absoluteUri.GetLeftPart(UriPartial.Path) == new Uri(url).GetLeftPart(UriPartial.Path))
+                            // Normalize URL for comparison and visited links check
+                            var normalizedAbsoluteUrl = NormalizeUrl(absoluteUrl);
+
+                            // Ignore anchor links that point to the same page (after normalization)
+                            if (absoluteUri.Fragment.Length > 0 && normalizedAbsoluteUrl == NormalizeUrl(url))
                             {
                                 Console.WriteLine($"    Ignoring anchor link: {absoluteUrl}");
                                 continue;
                             }
 
-                            if (!absoluteUrl.StartsWith(_baseUrl))
+                            // Compare hosts to ensure it's within the same domain
+                            if (absoluteUri.Host != _baseHost)
                             {
-                                Console.WriteLine($"    Not following (outside base URL): {absoluteUrl}");
+                                Console.WriteLine($"    Not following (outside base domain): {absoluteUrl}");
                                 continue;
                             }
 
-                            if (_visitedLinks.Contains(absoluteUrl))
+                            if (!_visitedLinks.Contains(normalizedAbsoluteUrl))
+                            {
+                                _visitedLinks.Add(normalizedAbsoluteUrl);
+                                _linksToScrape.Enqueue(absoluteUrl); // Enqueue the original URL for scraping
+                                _totalLinksDiscovered++;
+                                Console.WriteLine($"Following link: {absoluteUrl}");
+                            }
+                            else
                             {
                                 Console.WriteLine($"    Not following (already visited): {absoluteUrl}");
-                                continue;
                             }
-
-                            Console.WriteLine($"Following link: {absoluteUrl}");
-                            await ScrapePageAndFindLinks(absoluteUrl);
                         }
                         else
                         {
@@ -225,13 +243,18 @@ namespace WebsiteScraperUI
             {
                 Console.WriteLine($"Error scraping {url}: {ex.Message}");
             }
-            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _visitedLinks.Count * 100), StatusMessage = $"Scraped {_scrapedCount} of {_visitedLinks.Count} pages." });
+            _progress?.Report(new ProgressReport { PercentComplete = (int)((double)_scrapedCount / _totalLinksDiscovered * 100), StatusMessage = $"Scraped {_scrapedCount} of {_totalLinksDiscovered} pages." });
         }
-    }
 
-    public class ProgressReport
-    {
-        public int PercentComplete { get; set; }
-        public string? StatusMessage { get; set; }
+        private string NormalizeUrl(string url)
+        {
+            var uri = new Uri(url);
+            var normalizedUrl = uri.GetLeftPart(UriPartial.Path);
+            if (!normalizedUrl.EndsWith("/") && !string.IsNullOrEmpty(uri.AbsolutePath))
+            {
+                normalizedUrl += "/";
+            }
+            return normalizedUrl;
+        }
     }
 }
