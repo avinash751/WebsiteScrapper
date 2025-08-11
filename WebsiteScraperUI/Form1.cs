@@ -99,7 +99,12 @@ namespace WebsiteScraperUI
 
         private async Task ScrapePageAndFindLinks(string url)
         {
-            if (_visitedLinks.Contains(url)) return;
+            Console.WriteLine($"Attempting to scrape: {url}");
+            if (_visitedLinks.Contains(url))
+            {
+                Console.WriteLine($"Already visited: {url}");
+                return;
+            }
 
             _visitedLinks.Add(url);
             _scrapedCount++;
@@ -111,18 +116,37 @@ namespace WebsiteScraperUI
                 var document = new HtmlAgilityPack.HtmlDocument();
                 document.LoadHtml(html);
 
-                // Extract content
-                var contentNode = document.DocumentNode.SelectSingleNode("//div[@class='doc-content']"); // Targeted selector
+                // Refined Content Extraction
+                HtmlNode contentNode = document.DocumentNode.SelectSingleNode("//main") ??
+                                       document.DocumentNode.SelectSingleNode("//article") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@id='main-content']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@id='content']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@id='page-content']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@id='wrapper']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@id='container']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@class='main-content']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@class='content']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@class='page-content']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@class='wrapper']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@class='container']") ??
+                                       document.DocumentNode.SelectSingleNode("//div[@class='doc-content']");
+
                 if (contentNode != null)
                 {
                     var markdown = _converter.Convert(contentNode.InnerText);
                     _stringBuilder.AppendLine($"# {document.DocumentNode.SelectSingleNode("//title")?.InnerText ?? "No Title"}");
                     _stringBuilder.AppendLine(markdown);
                     _stringBuilder.AppendLine("\n---\n");
+                    Console.WriteLine($"Content extracted from {url}. Markdown length: {markdown.Length}");
+                }
+                else
+                {
+                    Console.WriteLine($"No suitable content node found for {url}");
                 }
 
                 // Find and follow links
                 var links = document.DocumentNode.SelectNodes("//a[@href]");
+                Console.WriteLine($"Found {links?.Count ?? 0} links on {url}");
                 if (links != null)
                 {
                     foreach (var link in links)
@@ -130,9 +154,19 @@ namespace WebsiteScraperUI
                         var href = link.GetAttributeValue("href", string.Empty);
                         if (!string.IsNullOrWhiteSpace(href))
                         {
-                            var absoluteUrl = new Uri(new Uri(_baseUrl), href).ToString();
+                            var absoluteUri = new Uri(new Uri(_baseUrl), href);
+                            var absoluteUrl = absoluteUri.ToString();
+
+                            // Ignore anchor links that point to the same page
+                            if (absoluteUri.Fragment.Length > 0 && absoluteUri.GetLeftPart(UriPartial.Path) == new Uri(url).GetLeftPart(UriPartial.Path))
+                            {
+                                Console.WriteLine($"Ignoring anchor link: {absoluteUrl}");
+                                continue;
+                            }
+
                             if (absoluteUrl.StartsWith(_baseUrl) && !_visitedLinks.Contains(absoluteUrl))
                             {
+                                Console.WriteLine($"Following link: {absoluteUrl}");
                                 await ScrapePageAndFindLinks(absoluteUrl);
                             }
                         }
