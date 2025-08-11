@@ -16,9 +16,19 @@ namespace WebsiteScraperUI
 {
     public partial class Form1 : Form
     {
+        private TreeView treeViewScrapedUrls; // Declare TreeView control
+
         public Form1()
         {
             InitializeComponent();
+
+            // Add a TreeView to display scraped URLs
+            treeViewScrapedUrls = new TreeView();
+            treeViewScrapedUrls.Name = "treeViewScrapedUrls";
+            treeViewScrapedUrls.Location = new System.Drawing.Point(12, statusLabel.Bottom + 10); // Position below statusLabel
+            treeViewScrapedUrls.Size = new System.Drawing.Size(this.ClientSize.Width - 24, this.ClientSize.Height - treeViewScrapedUrls.Location.Y - 10); // Fill remaining space
+            treeViewScrapedUrls.Anchor = AnchorStyles.Top | AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right;
+            this.Controls.Add(treeViewScrapedUrls);
         }
 
         private void browseButton_Click(object sender, EventArgs e)
@@ -46,6 +56,11 @@ namespace WebsiteScraperUI
             {
                 progressBar.Value = report.PercentComplete;
                 statusLabel.Text = report.StatusMessage;
+
+                if (!string.IsNullOrEmpty(report.DiscoveredUrl))
+                {
+                    AddUrlToTreeView(report.DiscoveredUrl);
+                }
             };
 
             try
@@ -68,12 +83,67 @@ namespace WebsiteScraperUI
                 browseButton.Enabled = true;
             }
         }
-    }
+
+        private void AddUrlToTreeView(string url)
+        {
+            if (treeViewScrapedUrls.InvokeRequired)
+            {
+                treeViewScrapedUrls.Invoke(new Action<string>(AddUrlToTreeView), url);
+                return;
+            }
+
+            Uri uri;
+            try
+            {
+                uri = new Uri(url);
+            }
+            catch (UriFormatException)
+            {
+                // Handle invalid URL format, perhaps log it or skip
+                return;
+            }
+
+            TreeNodeCollection currentNodes = treeViewScrapedUrls.Nodes;
+
+            string host = uri.Host;
+            if (string.IsNullOrEmpty(host))
+            {
+                // Handle cases where host is empty (e.g., file URIs)
+                host = "Local Files"; // Or some other placeholder
+            }
+
+            // Add host as root node if not present
+            if (!currentNodes.ContainsKey(host))
+            {
+                currentNodes.Add(host, host);
+            }
+            TreeNode hostNode = currentNodes[host]!; // Use null-forgiving operator
+
+            // Add path segments
+            string[] segments = uri.Segments;
+            TreeNodeCollection segmentNodes = hostNode.Nodes;
+
+            for (int i = 0; i < segments.Length; i++)
+            {
+                string segment = segments[i].Trim('/'); // Remove leading/trailing slashes
+                if (string.IsNullOrEmpty(segment)) continue;
+
+                // Ensure segment is not null or empty before using as key
+                if (!segmentNodes.ContainsKey(segment))
+                {
+                    segmentNodes.Add(segment, segment);
+                }
+                segmentNodes = segmentNodes[segment]!.Nodes; // Use null-forgiving operator
+            }
+        }
+
+    } // Closing brace for Form1 class
 
     public class ProgressReport
     {
         public int PercentComplete { get; set; }
         public string StatusMessage { get; set; } = string.Empty;
+        public string? DiscoveredUrl { get; set; } // New property for discovered URLs
     }
 
     public class Scraper
@@ -124,7 +194,7 @@ namespace WebsiteScraperUI
 
             _scrapedCount++;
             int percentComplete = _totalLinksDiscovered > 0 ? (int)((double)_scrapedCount / _totalLinksDiscovered * 100) : 0;
-            _progress?.Report(new ProgressReport { PercentComplete = percentComplete, StatusMessage = $"Scraping: {url}" });
+            _progress?.Report(new ProgressReport { PercentComplete = percentComplete, StatusMessage = $"Scraping: {url} ({percentComplete}%)" });
 
             try
             {
@@ -177,7 +247,7 @@ namespace WebsiteScraperUI
                     var markdown = _converter.Convert(contentNode.InnerText);
                     _stringBuilder.AppendLine($"# {document.DocumentNode.SelectSingleNode("//title")?.InnerText ?? "No Title"}");
                     _stringBuilder.AppendLine(markdown);
-                    _stringBuilder.AppendLine("\n---\n");
+                    _stringBuilder.AppendLine("\n---\n"); 
                     Console.WriteLine($"Content extracted from {url}. Markdown length: {markdown.Length}");
                 }
                 else
@@ -233,6 +303,8 @@ namespace WebsiteScraperUI
                                 _linksToScrape.Enqueue(absoluteUrl); // Enqueue the original URL for scraping
                                 _totalLinksDiscovered++;
                                 Console.WriteLine($"Following link: {absoluteUrl}");
+                                // Report the discovered URL to the UI
+                                _progress?.Report(new ProgressReport { DiscoveredUrl = absoluteUrl }); // Only report the URL
                             }
                             else
                             {
